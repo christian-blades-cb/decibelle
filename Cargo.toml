@@ -1,0 +1,13 @@
+[package]
+name = "decibelle"
+version = "0.1.0"
+authors = ["Christian Blades <cblades@pindrop.com>"]
+
+[dependencies]
+alsa-sys = "0.1.1"
+dsp = "0.3.0"
+time = "0.1"
+libc = "0.2"
+signalbool = "0.1.4"
+log = "0.3.8"
+env_logger = "0.4.3"
