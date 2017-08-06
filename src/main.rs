@@ -1,13 +1,15 @@
-extern crate alsa_sys;
-extern crate dsp;
-extern crate time;
-extern crate libc;
 extern crate signalbool;
+extern crate portaudio;
 #[macro_use]
 extern crate log;
 extern crate env_logger;
 
-use std::{mem, ffi};
+// use std::collections::VecDeque;
+
+const SAMPLE_RATE: f64 = 44_100.0;
+const CHANNELS: i32 = 2;
+const FRAMES: u32 = 256;
+const INTERLEAVED: bool = true;
 
 fn main() {
     env_logger::init().unwrap();
@@ -16,72 +18,66 @@ fn main() {
         .unwrap();
     debug!("signal handling");
 
-    unsafe {
-        let mut handle: *mut alsa_sys::snd_pcm_t = mem::uninitialized();
-        let device = ffi::CString::new("default").expect("unable to get device name");
-        let err = alsa_sys::snd_pcm_open(&mut handle,
-                                         device.as_ptr(),
-                                         alsa_sys::SND_PCM_STREAM_CAPTURE,
-                                         // alsa_sys::SND_PCM_NONBLOCK);
-                                         0);
-        if err < 0 {
-            panic!("device not available");
+    let pa = portaudio::PortAudio::new().unwrap();
+    info!("PortAudio version {}", pa.version());
+
+    let input = pa.default_input_device().unwrap();
+    let input_info = pa.device_info(input).unwrap();
+    info!("Default input device {:#?}", input_info);
+
+    // Construct the input stream parameters.
+    let latency = input_info.default_low_input_latency;
+    let input_params =
+        portaudio::StreamParameters::<f32>::new(input, CHANNELS, INTERLEAVED, latency);
+
+    let stream_settings = portaudio::stream::InputSettings::new(input_params, SAMPLE_RATE, FRAMES);
+    let mut stream = pa.open_blocking_stream(stream_settings).unwrap();
+
+    // let mut buffer: VecDeque<f32> = VecDeque::with_capacity(FRAMES as usize * CHANNELS as usize);
+
+    debug!("starting stream");
+    stream.start().unwrap();
+
+    // We'll use this function to wait for read/write availability.
+    fn wait_for_stream<F>(f: F, name: &str) -> u32
+        where F: Fn() -> Result<portaudio::StreamAvailable, portaudio::error::Error>
+    {
+        'waiting_for_stream: loop {
+            match f() {
+                Ok(available) => {
+                    match available {
+                        portaudio::StreamAvailable::Frames(frames) => return frames as u32,
+                        portaudio::StreamAvailable::InputOverflowed => {
+                            println!("Input stream has overflowed")
+                        }
+                        portaudio::StreamAvailable::OutputUnderflowed => {
+                            println!("Output stream has underflowed")
+                        }
+                    }
+                }
+                Err(err) => {
+                    panic!("An error occurred while waiting for the {} stream: {}",
+                           name,
+                           err)
+                }
+            }
+        }
+    };
+
+    'stream: loop {
+        if sb.caught() {
+            println!("caught signal!");
+            break;
         }
 
-        let err = alsa_sys::snd_pcm_set_params(handle,
-                                               alsa_sys::SND_PCM_FORMAT_S16_LE,
-                                               alsa_sys::SND_PCM_ACCESS_RW_INTERLEAVED,
-                                               1,
-                                               48000,
-                                               1,
-                                               500000);
-        if err < 0 {
-            alsa_sys::snd_pcm_close(handle);
-            panic!("unable to setup pcm capture");
+        let frames = wait_for_stream(|| stream.read_available(), "Read");
+        if frames > 0 {
+            let samples: &[f32] = stream.read(frames).unwrap();
+            let sum_squares: f64 = samples.into_iter().map(|&x| x as f64 * x as f64).sum();
+            let rms = sum_squares.sqrt();
+            println!("rms: {}", rms);
         }
-
-        alsa_sys::snd_pcm_prepare(handle);
-        debug!("setup complete");
-
-        debug!("waiting for ready");
-        match alsa_sys::snd_pcm_wait(handle, 30000) {
-            0 => {
-                alsa_sys::snd_pcm_close(handle);
-                panic!("timeout waiting for pcm ready")
-            }
-            1 => debug!("ready!"),
-            _ => debug!("wut?"),
-        };
-
-        let mut buffer: &mut [i16] = &mut [0; 8 * 1024];
-        let bufptr: *mut libc::c_void = buffer.as_mut_ptr() as *mut libc::c_void;
-        let bufsize = buffer.len() as alsa_sys::snd_pcm_uframes_t;
-
-        loop {
-            if sb.caught() {
-                println!("signal caught!");
-                break;
-            }
-            // debug!("filling buffer");
-            let frames = alsa_sys::snd_pcm_readi(handle, bufptr, bufsize);
-            // debug!("frames {}", frames);
-            if frames == -11 {
-                debug!("EAGAIN");
-                continue;
-            }
-            if frames > 0 {
-                debug!("errno {}", -frames);
-                continue;
-            }
-
-            let sums: f64 =
-                (0..frames).map(|x| buffer[x as usize] as f64 * buffer[x as usize] as f64).sum();
-            let rms = sums.sqrt();
-            println!("rms {}", rms);
-
-            // info!("loop'd");
-        }
-
-        alsa_sys::snd_pcm_close(handle);
     }
+
+    stream.close().unwrap();
 }
