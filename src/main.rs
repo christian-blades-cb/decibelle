@@ -11,6 +11,8 @@ const CHANNELS: i32 = 2;
 const FRAMES: u32 = 256;
 const INTERLEAVED: bool = true;
 
+const K: f64 = 0.45255; // from https://github.com/johnliu55tw/ALSASoundMeter/blob/master/sound_meter.c
+
 fn main() {
     env_logger::init().unwrap();
     let sb = signalbool::SignalBool::new(&[signalbool::Signal::SIGINT],
@@ -29,7 +31,6 @@ fn main() {
     let latency = input_info.default_low_input_latency;
     let input_params =
         portaudio::StreamParameters::<f32>::new(input, CHANNELS, INTERLEAVED, latency);
-
     let stream_settings = portaudio::stream::InputSettings::new(input_params, SAMPLE_RATE, FRAMES);
     let mut stream = pa.open_blocking_stream(stream_settings).unwrap();
 
@@ -74,8 +75,8 @@ fn main() {
         if frames > 0 {
             let samples: &[f32] = stream.read(frames).unwrap();
             let sum_squares: f64 = samples.into_iter().map(|&x| x as f64 * x as f64).sum();
-            let rms = sum_squares.sqrt();
-            println!("rms: {}", rms);
+            let rms = (sum_squares / samples.len() as f64).sqrt();
+            println!("rms: {} db: {}", rms, 20.0 * (K * rms).log(10.0));
         }
     }
 
