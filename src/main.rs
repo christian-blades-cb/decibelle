@@ -11,7 +11,10 @@ const CHANNELS: i32 = 2;
 const FRAMES: u32 = 256;
 const INTERLEAVED: bool = true;
 
-const K: f64 = 0.45255; // from https://github.com/johnliu55tw/ALSASoundMeter/blob/master/sound_meter.c
+// 0.0790569415 - https://github.com/yorban/SmartSoundMeasurement/blob/master/app/src/main/java/com/csau/smartsound/splmeasurement/SmartSoundMeasurement.java
+// 0.45255; // from https://github.com/johnliu55tw/ALSASoundMeter/blob/master/sound_meter.c
+const K: f64 = 0.0790569415;
+const BASE: f64 = 110.0;
 
 fn main() {
     env_logger::init().unwrap();
@@ -76,9 +79,10 @@ fn main() {
             let samples: &[f32] = stream.read(frames).unwrap();
             let sum_squares: f64 = samples.into_iter().map(|&x| x as f64 * x as f64).sum();
             let rms = (sum_squares / samples.len() as f64).sqrt();
-            println!("rms: {} db: {}", rms, 20.0 * (K * rms).log(10.0));
+            let db = BASE + (20.0 * (K * rms).log10());
+            println!("rms: {} db: {}", rms, db);
         }
     }
-
+    
     stream.close().unwrap();
 }
