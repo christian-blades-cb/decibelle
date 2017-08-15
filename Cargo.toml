@@ -6,5 +6,6 @@ authors = ["Christian Blades <cblades@pindrop.com>"]
 [dependencies]
 portaudio = "0.7.0"
 signalbool = "0.1.4"
+rand = "0.3.16"
 log = "0.3.8"
 env_logger = "0.4.3"
